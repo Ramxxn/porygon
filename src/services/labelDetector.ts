@@ -1,5 +1,5 @@
 
-import { getDocument } from "pdfjs-dist";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import type {
   CropBox,
   DetectionSettings,
@@ -130,98 +130,54 @@ function detectGrid(
 }
 
 export async function detectLabelsForPage(options: {
-  pdfBytes: Uint8Array;
+  pdf: PDFDocumentProxy;
   sourceFileId: string;
   sourceFileName: string;
   pageIndex: number;
   settings: DetectionSettings;
 }): Promise<ShippingLabel[]> {
-  const { pdfBytes, sourceFileId, sourceFileName, pageIndex, settings } =
+  const { pdf, sourceFileId, sourceFileName, pageIndex, settings } =
     options;
 
-  const pdf = await getDocument({ data: pdfBytes.slice() }).promise;
+  const page = await pdf.getPage(pageIndex + 1);
+  const viewport = page.getViewport({ scale: 1 });
+  const pageWidth = viewport.width;
+  const pageHeight = viewport.height;
 
-  try {
-    const page = await pdf.getPage(pageIndex + 1);
-    const viewport = page.getViewport({ scale: 1 });
-    const pageWidth = viewport.width;
-    const pageHeight = viewport.height;
-
-    if (settings.mode === "grid") {
-      return detectGrid(
-        sourceFileId,
-        sourceFileName,
-        pageIndex,
-        pageWidth,
-        pageHeight,
-        settings,
-      );
-    }
-
-    const markers = await getPageMarkers(
-      page as unknown as PdfPage,
+  if (settings.mode === "grid") {
+    return detectGrid(
+      sourceFileId,
+      sourceFileName,
+      pageIndex,
+      pageWidth,
       pageHeight,
+      settings,
     );
-
-    const productMarkers = markers.filter((marker) =>
-      /\b(product details|invoice details|tax invoice|invoice)\b/i.test(
-        marker.text,
-      ),
-    );
-
-    const shippingMarkers = markers.filter((marker) =>
-      /\b(customer address|delivery address|ship to|delhivery|awb)\b/i.test(
-        marker.text,
-      ),
-    );
-
-    // A product/invoice marker can suggest where the shipping section ends.
-    // Keep a safety margin above it so the boundary does not cut through text.
-    const earliestProductY =
-      productMarkers.length > 0
-        ? Math.min(...productMarkers.map((marker) => marker.y))
-        : null;
-
-    const hasShippingText = shippingMarkers.length > 0;
-
-    if (earliestProductY !== null && hasShippingText) {
-      const top = pageHeight - 4;
-      const bottom = clamp(
-        pageHeight - earliestProductY + 8,
-        0,
-        pageHeight - 1,
-      );
-
-      return [
-        makeLabel(
-          sourceFileId,
-          sourceFileName,
-          pageIndex,
-          pageWidth,
-          pageHeight,
-          { left: 4, bottom, right: pageWidth - 4, top },
-          0.65,
-          "text",
-        ),
-      ];
-    }
-
-    // Do not pretend an uncertain page has been detected accurately.
-    // Return a full-page candidate with low confidence for user correction.
-    return [
-      makeLabel(
-        sourceFileId,
-        sourceFileName,
-        pageIndex,
-        pageWidth,
-        pageHeight,
-        { left: 0, bottom: 0, right: pageWidth, top: pageHeight },
-        0.2,
-        "manual",
-      ),
-    ];
-  } finally {
-    // No cleanup needed here.
-  // The PDF.js document is managed separately by the app.
   }
+
+  const markers = await getPageMarkers(
+    page as unknown as PdfPage,
+    pageHeight,
+  );
+  const hasShippingText = markers.some((marker) =>
+    /\b(ship(?:ping)?\s*(?:to|from|label)?|customer address|delivery address|return address|awb|waybill|order number|cod|barcode|sku)\b/i.test(
+      marker.text,
+    ),
+  );
+
+  // Text extraction cannot reliably distinguish a label from its invoice.
+  // Keep the whole page until a person confirms the crop rather than risk
+  // clipping addresses, payment details, identifiers, or machine-readable codes.
+  return [
+    makeLabel(
+      sourceFileId,
+      sourceFileName,
+      pageIndex,
+      pageWidth,
+      pageHeight,
+      { left: 0, bottom: 0, right: pageWidth, top: pageHeight },
+      hasShippingText ? 0.45 : 0.2,
+      hasShippingText ? "text" : "manual",
+    ),
+  ];
 }

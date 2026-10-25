@@ -3,12 +3,14 @@ import type { ShippingLabel } from "../types/label";
 
 type LabelEditorProps = {
     label?: ShippingLabel;
-    onChange: (updated: ShippingLabel) => void;
+    onRemove: (id: string) => void;
+    onMove: (id: string, direction: -1 | 1) => void;
 };
 
 export default function LabelEditor({
     label,
-    onChange,
+    onRemove,
+    onMove,
 }: LabelEditorProps) {
     if (!label) {
         return (
@@ -23,121 +25,38 @@ export default function LabelEditor({
 
     const { sourcePageWidth: width, sourcePageHeight: height, cropBox } = label;
 
-    const topPercent = (cropBox.top / height) * 100;
-    const bottomPercent = (cropBox.bottom / height) * 100;
-    const leftPercent = (cropBox.left / width) * 100;
-    const rightPercent = (cropBox.right / width) * 100;
-
-    function updateBox(
-        key: "left" | "bottom" | "right" | "top",
-        value: number,
-    ) {
-        const next = {
-            ...label.cropBox,
-            [key]: value,
-        };
-
-        if (
-            next.left < 0 ||
-            next.bottom < 0 ||
-            next.right > width ||
-            next.top > height ||
-            next.left >= next.right ||
-            next.bottom >= next.top
-        ) {
-            return;
-        }
-
-        onChange({
-            ...label,
-            cropBox: next,
-            detectionMethod: "manual",
-            confidence: 1,
-        });
-    }
-
-    function BoundaryControl({
-        title,
-        value,
-        min,
-        max,
-        onValue,
-    }: {
-        title: string;
-        value: number;
-        min: number;
-        max: number;
-        onValue: (value: number) => void;
-    }) {
-        return (
-            <label className="block">
-                <span className="mb-2 flex justify-between text-xs text-gray-600">
-                    <span>{title}</span>
-                    <span className="font-medium tabular-nums">
-                        {value.toFixed(1)}%
-                    </span>
-                </span>
-                <input
-                    type="range"
-                    min={min}
-                    max={max}
-                    step={0.5}
-                    value={value}
-                    onChange={(event) => onValue(Number(event.target.value))}
-                    className="w-full accent-blue-600"
-                />
-            </label>
-        );
-    }
-
     return (
         <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="mb-4">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
                 <h2 className="text-sm font-semibold">Crop editor</h2>
                 <p className="mt-1 text-xs text-gray-500">
-                    Adjust the crop region for {label.sourceFileName}, page{" "}
+                    Drag the highlighted region to move it; use its handles to resize.{" "}
+                    {label.sourceFileName}, page{" "}
                     {label.pageIndex + 1}.
                 </p>
+                </div>
+                <div className="flex gap-1.5">
+                    <button type="button" onClick={() => onMove(label.id, -1)} className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs hover:bg-gray-50">
+                        Move up
+                    </button>
+                    <button type="button" onClick={() => onMove(label.id, 1)} className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs hover:bg-gray-50">
+                        Move down
+                    </button>
+                    <button type="button" onClick={() => onRemove(label.id)} className="rounded-md border border-rose-200 px-2.5 py-1.5 text-xs text-rose-700 hover:bg-rose-50">
+                        Remove label
+                    </button>
+                </div>
             </div>
 
-            <div className="space-y-5">
-                <BoundaryControl
-                    title="Top boundary"
-                    value={topPercent}
-                    min={Math.max(bottomPercent + 1, 1)}
-                    max={100}
-                    onValue={(value) => updateBox("top", (value / 100) * height)}
-                />
-
-                <BoundaryControl
-                    title="Bottom boundary"
-                    value={bottomPercent}
-                    min={0}
-                    max={Math.min(topPercent - 1, 99)}
-                    onValue={(value) => updateBox("bottom", (value / 100) * height)}
-                />
-
-                <BoundaryControl
-                    title="Left boundary"
-                    value={leftPercent}
-                    min={0}
-                    max={Math.min(rightPercent - 1, 99)}
-                    onValue={(value) => updateBox("left", (value / 100) * width)}
-                />
-
-                <BoundaryControl
-                    title="Right boundary"
-                    value={rightPercent}
-                    min={Math.max(leftPercent + 1, 1)}
-                    max={100}
-                    onValue={(value) => updateBox("right", (value / 100) * width)}
-                />
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-600">
+                <span>Width <strong className="text-[#263238]">{(cropBox.right - cropBox.left).toFixed(1)} pt</strong></span>
+                <span>Height <strong className="text-[#263238]">{(cropBox.top - cropBox.bottom).toFixed(1)} pt</strong></span>
+                <span>Page <strong className="text-[#263238]">{width.toFixed(0)} × {height.toFixed(0)} pt</strong></span>
             </div>
 
-            <div className="mt-5 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-800">
-                Tip: move the bottom boundary above the invoice or product-details
-                section. Keep the complete shipping address and all barcodes inside
-                the crop.
+            <div className="mt-4 rounded-lg bg-[#68C7D0]/15 p-3 text-xs leading-5 text-[#263238]">
+                Keep customer and return addresses, COD, QR/barcodes, SKU, size, quantity, color, and order number inside the crop.
             </div>
         </section>
     );

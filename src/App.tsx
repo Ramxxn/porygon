@@ -1,6 +1,5 @@
 
 import { useState } from "react";
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { Download, ScanSearch } from "lucide-react";
 
@@ -22,17 +21,16 @@ import type {
 } from "./types/label";
 
 import { detectLabelsForPage } from "./services/labelDetector";
-import { exportLabelsToPdf, downloadPdf } from "./services/pdfExporter";
-
-GlobalWorkerOptions.workerSrc = workerUrl;
 
 const initialLayout: LabelLayout = {
   columns: 2,
-  rows: 3,
+  rows: 2,
   pageWidth: 595.28,
   pageHeight: 841.89,
   margin: 18,
-  gap: 10,
+  gap: 12,
+  labelWidth: 288,
+  labelHeight: 432,
 };
 
 export default function App() {
@@ -41,7 +39,6 @@ export default function App() {
   const [cropMode, setCropMode] = useState<CropMode>("auto");
   const [rows, setRows] = useState(2);
   const [columns, setColumns] = useState(3);
-  const [keepRatio, setKeepRatio] = useState(0.68);
   const [labels, setLabels] = useState<ShippingLabel[]>([]);
   const [selectedLabelId, setSelectedLabelId] = useState("");
   const [layout, setLayout] = useState<LabelLayout>(initialLayout);
@@ -72,9 +69,12 @@ export default function App() {
     const loadedFiles: SourcePdf[] = [];
 
     try {
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
       for (const file of pdfFiles) {
         const data = new Uint8Array(await file.arrayBuffer());
-        const pdf = await getDocument({ data }).promise;
+        const pdf = await pdfjs.getDocument({ data }).promise;
 
         loadedFiles.push({
           id: crypto.randomUUID(),
@@ -88,9 +88,13 @@ export default function App() {
       if (!activeId && loadedFiles[0]) {
         setActiveId(loadedFiles[0].id);
       }
-    } catch {
-      for (const item of loadedFiles) void item.pdf.destroy();
-      setError("A PDF could not be opened. Please check the file.");
+    } catch (cause) {
+      for (const item of loadedFiles) void item.pdf.cleanup();
+      setError(
+        cause instanceof Error
+          ? `A PDF could not be opened: ${cause.message}`
+          : "A PDF could not be opened. Please check the file.",
+      );
     } finally {
       setLoading(false);
     }
@@ -98,13 +102,19 @@ export default function App() {
 
   function handleRemove(id: string) {
     const removed = files.find((file) => file.id === id);
-    if (removed) void removed.pdf.destroy();
+    if (removed) void removed.pdf.cleanup();
 
     const remaining = files.filter((file) => file.id !== id);
+    const remainingLabels = labels.filter((label) => label.sourceFileId !== id);
     setFiles(remaining);
-    setLabels((current) => current.filter((label) => label.sourceFileId !== id));
+    setLabels(remainingLabels);
+    if (!remainingLabels.some((label) => label.id === selectedLabelId)) {
+      setSelectedLabelId(remainingLabels[0]?.id ?? "");
+    }
 
-    if (activeId === id) setActiveId(remaining[0]?.id ?? "");
+    if (activeId === id) {
+      setActiveId(remainingLabels[0]?.sourceFileId ?? remaining[0]?.id ?? "");
+    }
   }
 
   async function runDetection() {
@@ -124,15 +134,13 @@ export default function App() {
         mode: cropMode,
         rows,
         columns,
-        shippingLabelHeightRatio: keepRatio,
+        shippingLabelHeightRatio: 1,
       };
 
       for (const source of files) {
-        const bytes = new Uint8Array(await source.file.arrayBuffer());
-
         for (let pageIndex = 0; pageIndex < source.pdf.numPages; pageIndex++) {
           const pageLabels = await detectLabelsForPage({
-            pdfBytes: bytes,
+            pdf: source.pdf,
             sourceFileId: source.id,
             sourceFileName: source.file.name,
             pageIndex,
@@ -165,6 +173,31 @@ export default function App() {
     );
   }
 
+  function selectLabel(id: string) {
+    const label = labels.find((item) => item.id === id);
+    setSelectedLabelId(id);
+    if (label) setActiveId(label.sourceFileId);
+  }
+
+  function removeLabel(id: string) {
+    const next = labels.filter((label) => label.id !== id);
+    setLabels(next);
+    if (selectedLabelId === id) {
+      setSelectedLabelId(next[0]?.id ?? "");
+    }
+  }
+
+  function moveLabel(id: string, direction: -1 | 1) {
+    setLabels((current) => {
+      const index = current.findIndex((label) => label.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const reordered = [...current];
+      [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+      return reordered;
+    });
+  }
+
   async function handleExport(oneLabelPerPage: boolean) {
     if (!labels.length) {
       setError("Detect labels before exporting.");
@@ -180,6 +213,9 @@ export default function App() {
         files.map((item) => [item.id, item.file]),
       );
 
+      const { exportLabelsToPdf, downloadPdf } = await import(
+        "./services/pdfExporter"
+      );
       const bytes = await exportLabelsToPdf({
         labels,
         sourceFiles: sourceMap,
@@ -203,8 +239,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <Header canExport={labels.length > 0 && !exporting} />
+    <div className="min-h-screen bg-white text-[#263238]">
+      <Header
+        canExport={labels.length > 0 && !exporting}
+        onExport={() => void handleExport(false)}
+      />
 
       <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-7 sm:px-6 lg:px-8">
         <div>
@@ -215,8 +254,8 @@ export default function App() {
             Prepare shipping labels
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
-            Keep the complete shipping label. Exclude invoice and product-details
-            sections before printing.
+            Preserve every label detail, then refine the crop and arrange labels
+            for print.
           </p>
         </div>
 
@@ -251,29 +290,6 @@ export default function App() {
               onColumnsChange={setColumns}
             />
 
-            {cropMode === "grid" && (
-              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                <label className="block text-xs text-gray-600">
-                  Keep each grid cell's top
-                  <span className="ml-1 font-semibold text-gray-900">
-                    {Math.round(keepRatio * 100)}%
-                  </span>
-                  <input
-                    type="range"
-                    min="35"
-                    max="100"
-                    value={Math.round(keepRatio * 100)}
-                    onChange={(event) => setKeepRatio(Number(event.target.value) / 100)}
-                    className="mt-3 w-full accent-blue-600"
-                  />
-                </label>
-                <p className="mt-2 text-[11px] leading-5 text-gray-500">
-                  Use this to exclude the invoice portion below a shipping label.
-                  Check each crop before exporting.
-                </p>
-              </section>
-            )}
-
             <button
               type="button"
               onClick={runDetection}
@@ -286,7 +302,12 @@ export default function App() {
           </aside>
 
           <div className="min-w-0 space-y-5">
-            <PdfPreview file={activeFile} />
+            <PdfPreview
+              key={`${activeId}:${selectedLabelId}`}
+              file={activeFile}
+              label={selectedLabel}
+              onLabelChange={updateLabel}
+            />
 
             <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -305,13 +326,14 @@ export default function App() {
                 labels={labels}
                 files={files}
                 selectedId={selectedLabelId}
-                onSelect={setSelectedLabelId}
+                onSelect={selectLabel}
               />
             </section>
 
             <LabelEditor
               label={selectedLabel}
-              onChange={updateLabel}
+              onRemove={removeLabel}
+              onMove={moveLabel}
             />
 
             <LayoutSettings layout={layout} onChange={setLayout} />

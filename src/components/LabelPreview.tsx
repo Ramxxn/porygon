@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { ShippingLabel } from "../types/label";
 import type { SourcePdf } from "../types/pdf";
+import { getPageRaster } from "../services/pageRaster";
 
 type LabelPreviewProps = {
   labels: ShippingLabel[];
@@ -22,19 +23,36 @@ type ThumbnailProps = {
 };
 
 function LabelThumbnail({ label, source }: ThumbnailProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [visible, setVisible] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading",
   );
 
   useEffect(() => {
-    let cancelled = false;
-    let renderTask: { cancel: () => void } | undefined;
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "180px" },
+    );
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
+  useEffect(() => {
+    let cancelled = false;
     async function renderCrop() {
       const canvas = canvasRef.current;
       const context = canvas?.getContext("2d");
 
+      if (!visible) return;
       if (!canvas || !context || !source) {
         setStatus("error");
         return;
@@ -43,30 +61,12 @@ function LabelThumbnail({ label, source }: ThumbnailProps) {
       setStatus("loading");
 
       try {
-        const page = await source.pdf.getPage(label.pageIndex + 1);
-        const scale = 0.8;
-        const viewport = page.getViewport({ scale });
-
-        const fullCanvas = document.createElement("canvas");
-        fullCanvas.width = Math.ceil(viewport.width);
-        fullCanvas.height = Math.ceil(viewport.height);
-
-        const fullContext = fullCanvas.getContext("2d");
-        if (!fullContext) throw new Error("Canvas is unavailable.");
-
-        renderTask = page.render({
-          canvas: fullCanvas,
-          canvasContext: fullContext,
-          viewport,
-        });
-
-        await (renderTask as { promise: Promise<void> }).promise;
+        const fullCanvas = await getPageRaster(source, label.pageIndex);
+        const scale = fullCanvas.width / label.sourcePageWidth;
 
         if (cancelled) return;
 
-        const pageHeight = source.pdf.getPage
-          ? label.sourcePageHeight
-          : viewport.height / scale;
+        const pageHeight = label.sourcePageHeight;
 
         const left = label.cropBox.left * scale;
         const top = (pageHeight - label.cropBox.top) * scale;
@@ -94,8 +94,6 @@ function LabelThumbnail({ label, source }: ThumbnailProps) {
           canvas.height,
         );
 
-        fullCanvas.width = 0;
-        fullCanvas.height = 0;
         if (!cancelled) setStatus("ready");
       } catch {
         if (!cancelled) setStatus("error");
@@ -106,25 +104,21 @@ function LabelThumbnail({ label, source }: ThumbnailProps) {
 
     return () => {
       cancelled = true;
-      renderTask?.cancel();
     };
-  }, [label, source]);
-
-  if (status === "error") {
-    return (
-      <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-lg bg-gray-50 text-gray-500">
-        <AlertTriangle size={20} />
-        <span className="text-xs">Preview unavailable</span>
-      </div>
-    );
-  }
+  }, [label, source, visible]);
 
   return (
-    <div className="flex min-h-40 items-center justify-center overflow-hidden rounded-lg border border-gray-100 bg-gray-50 p-2">
-      {status === "loading" && (
+    <div ref={containerRef} className="flex min-h-40 items-center justify-center overflow-hidden rounded-lg border border-gray-100 bg-gray-50 p-2">
+      {status === "loading" && visible && (
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <LoaderCircle size={15} className="animate-spin" />
           Rendering crop…
+        </div>
+      )}
+      {status === "error" && (
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <AlertTriangle size={16} />
+          Preview unavailable
         </div>
       )}
       <canvas

@@ -19,7 +19,7 @@ const modes: {
   {
     id: "auto",
     title: "Auto-detect",
-    description: "Find shipping label boundaries",
+    description: "Keep complete pages for safe crop review",
   },
   {
     id: "grid",
@@ -29,7 +29,7 @@ const modes: {
   {
     id: "manual",
     title: "Manual crop",
-    description: "Adjust boundaries yourself",
+    description: "Start with a full page and draw the crop",
   },
 ];
 
@@ -126,8 +126,8 @@ export default function CropSettings({
       <div className="mt-4 flex gap-2 border-t border-gray-100 pt-4 text-[11px] leading-5 text-gray-500">
         <Settings2 size={15} className="mt-0.5 shrink-0" />
         <p>
-          These settings define the intended crop mode. The crop-processing
-          service will be connected next.
+          Auto mode preserves the full page for safe review. Drag the crop on the
+          preview to refine the label before export.
         </p>
       </div>
     </section>

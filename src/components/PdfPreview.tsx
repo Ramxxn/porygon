@@ -1,21 +1,38 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, FileText } from "lucide-react";
+import type { PointerEvent as ReactPointerEvent } from "react";
+import type { ShippingLabel } from "../types/label";
 import type { SourcePdf } from "../types/pdf";
+import { getPageRaster } from "../services/pageRaster";
 
 type PdfPreviewProps = {
   file?: SourcePdf;
+  label?: ShippingLabel;
+  onLabelChange: (label: ShippingLabel) => void;
 };
 
-export default function PdfPreview({ file }: PdfPreviewProps) {
-  const [pageNumber, setPageNumber] = useState(1);
+type DragState = {
+  pointerX: number;
+  pointerY: number;
+  cropBox: ShippingLabel["cropBox"];
+  action: "move" | "resize";
+  handle?: string;
+};
+
+export default function PdfPreview({
+  file,
+  label,
+  onLabelChange,
+}: PdfPreviewProps) {
+  const [pageNumber, setPageNumber] = useState(
+    label && label.sourceFileId === file?.id ? label.pageIndex + 1 : 1,
+  );
   const [error, setError] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    setPageNumber(1);
-    setError("");
-  }, [file?.id]);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const [dragBox, setDragBox] = useState<ShippingLabel["cropBox"] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,25 +42,24 @@ export default function PdfPreview({ file }: PdfPreviewProps) {
 
       try {
         setError("");
-        const page = await file.pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.25 });
+        const raster = await getPageRaster(file, pageNumber - 1);
+        if (cancelled) return;
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d");
 
         if (!context) return;
 
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        await page.render({
-          canvasContext: context,
-          canvas,
-          viewport,
-        }).promise;
-
-        if (cancelled) return;
-      } catch {
-        if (!cancelled) setError("Unable to render this PDF page.");
+        canvas.width = raster.width;
+        canvas.height = raster.height;
+        context.drawImage(raster, 0, 0);
+      } catch (cause) {
+        if (!cancelled) {
+          setError(
+            cause instanceof Error
+              ? `Unable to render this PDF page: ${cause.message}`
+              : "Unable to render this PDF page.",
+          );
+        }
       }
     }
 
@@ -53,6 +69,81 @@ export default function PdfPreview({ file }: PdfPreviewProps) {
       cancelled = true;
     };
   }, [file, pageNumber]);
+
+  const showCrop = Boolean(
+    label &&
+      label.sourceFileId === file?.id &&
+      label.pageIndex + 1 === pageNumber,
+  );
+
+  function startDrag(
+    event: ReactPointerEvent<HTMLElement>,
+    action: DragState["action"],
+    handle?: string,
+  ) {
+    if (!label || !pageRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      cropBox: { ...label.cropBox },
+      action,
+      handle,
+    };
+    setDragBox({ ...label.cropBox });
+  }
+
+  function updateDrag(event: ReactPointerEvent<HTMLElement>) {
+    const drag = dragRef.current;
+    if (!drag || !label || !pageRef.current) return;
+    const bounds = pageRef.current.getBoundingClientRect();
+    const dx = ((event.clientX - drag.pointerX) / bounds.width) * label.sourcePageWidth;
+    const dy = ((event.clientY - drag.pointerY) / bounds.height) * label.sourcePageHeight;
+    const minimum = 8;
+    let { left, right, bottom, top } = drag.cropBox;
+
+    if (drag.action === "move") {
+      const width = right - left;
+      const height = top - bottom;
+      left = Math.max(0, Math.min(label.sourcePageWidth - width, left + dx));
+      right = left + width;
+      top = Math.max(height, Math.min(label.sourcePageHeight, top - dy));
+      bottom = top - height;
+    } else {
+      const handle = drag.handle ?? "";
+      if (handle.includes("w")) left = Math.max(0, Math.min(right - minimum, left + dx));
+      if (handle.includes("e")) right = Math.min(label.sourcePageWidth, Math.max(left + minimum, right + dx));
+      if (handle.includes("n")) top = Math.min(label.sourcePageHeight, Math.max(bottom + minimum, top - dy));
+      if (handle.includes("s")) bottom = Math.max(0, Math.min(top - minimum, bottom - dy));
+    }
+
+    setDragBox({ left, right, bottom, top });
+  }
+
+  function finishDrag() {
+    if (dragBox && label) {
+      onLabelChange({
+        ...label,
+        cropBox: dragBox,
+        detectionMethod: "manual",
+        confidence: 1,
+      });
+    }
+    dragRef.current = null;
+    setDragBox(null);
+  }
+
+  const visibleBox = dragBox ?? label?.cropBox;
+  const cropStyle = showCrop && label
+    ? {
+        left: `${((visibleBox?.left ?? 0) / label.sourcePageWidth) * 100}%`,
+        top: `${((label.sourcePageHeight - (visibleBox?.top ?? 0)) / label.sourcePageHeight) * 100}%`,
+        width: `${(((visibleBox?.right ?? 0) - (visibleBox?.left ?? 0)) / label.sourcePageWidth) * 100}%`,
+        height: `${(((visibleBox?.top ?? 0) - (visibleBox?.bottom ?? 0)) / label.sourcePageHeight) * 100}%`,
+      }
+    : undefined;
 
   return (
     <section className="flex min-h-[620px] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -94,8 +185,32 @@ export default function PdfPreview({ file }: PdfPreviewProps) {
 
       <div className="flex flex-1 items-center justify-center overflow-auto bg-gray-100 p-4 sm:p-7">
         {file ? (
-          <div className="max-w-full bg-white p-2 shadow-md ring-1 ring-gray-200">
-            <canvas ref={canvasRef} className="block h-auto max-w-full" />
+          <div ref={pageRef} className="relative w-full max-w-[680px] bg-white shadow-md ring-1 ring-gray-200">
+            <canvas ref={canvasRef} className="block h-auto w-full" />
+            {cropStyle && (
+              <div
+                className="absolute z-10 cursor-move touch-none border-2 border-[#E85D79] bg-[#E85D79]/10 shadow-[0_0_0_9999px_rgba(38,50,56,0.32)]"
+                style={cropStyle}
+                onPointerDown={(event) => startDrag(event, "move")}
+                onPointerMove={updateDrag}
+                onPointerUp={finishDrag}
+                onPointerCancel={finishDrag}
+                aria-label="Drag to reposition the crop. Drag a handle to resize."
+              >
+                {["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((handle) => (
+                  <span
+                    key={handle}
+                    role="presentation"
+                    onPointerDown={(event) => startDrag(event, "resize", handle)}
+                    className={`absolute z-20 h-3 w-3 rounded-sm border-2 border-white bg-[#E85D79] shadow ${
+                      handle.includes("n") ? "top-[-6px]" : handle.includes("s") ? "bottom-[-6px]" : "top-1/2 -translate-y-1/2"
+                    } ${
+                      handle.includes("w") ? "left-[-6px]" : handle.includes("e") ? "right-[-6px]" : "left-1/2 -translate-x-1/2"
+                    } ${handle === "n" || handle === "s" ? "cursor-ns-resize" : handle === "e" || handle === "w" ? "cursor-ew-resize" : "cursor-nwse-resize"}`}
+                  />
+                ))}
+              </div>
+            )}
             {error && (
               <p role="alert" className="p-3 text-sm text-red-600">
                 {error}

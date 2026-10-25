@@ -21,6 +21,14 @@ export async function exportLabelsToPdf({
   if (!labels.length) {
     throw new Error("There are no labels to export.");
   }
+  if (
+    layout.pageWidth <= 0 ||
+    layout.pageHeight <= 0 ||
+    layout.labelWidth <= 0 ||
+    layout.labelHeight <= 0
+  ) {
+    throw new Error("Page and label dimensions must be greater than zero.");
+  }
 
   const output = await PDFDocument.create();
   const embeddedLabels: EmbeddedLabel[] = await embedCroppedLabels(
@@ -31,12 +39,18 @@ export async function exportLabelsToPdf({
 
   if (oneLabelPerPage) {
     for (const item of embeddedLabels) {
-      const page = output.addPage([item.page.width, item.page.height]);
+      const page = output.addPage([layout.labelWidth, layout.labelHeight]);
+      const scale = Math.min(
+        layout.labelWidth / item.page.width,
+        layout.labelHeight / item.page.height,
+      );
+      const width = item.page.width * scale;
+      const height = item.page.height * scale;
       page.drawPage(item.page, {
-        x: 0,
-        y: 0,
-        width: item.page.width,
-        height: item.page.height,
+        x: (layout.labelWidth - width) / 2,
+        y: (layout.labelHeight - height) / 2,
+        width,
+        height,
       });
     }
   } else {
@@ -79,6 +93,8 @@ export async function exportLabelsToPdf({
         const scale = Math.min(
           cellWidth / item.page.width,
           cellHeight / item.page.height,
+          layout.labelWidth / item.page.width,
+          layout.labelHeight / item.page.height,
         );
 
         const width = item.page.width * scale;
@@ -112,5 +128,5 @@ export function downloadPdf(bytes: Uint8Array, filename: string) {
   link.download = filename;
   link.click();
 
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

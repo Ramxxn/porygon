@@ -27,6 +27,8 @@ export type LabelLayout = {
   pageHeight: number;
   margin: number;
   gap: number;
+  labelWidth: number;
+  labelHeight: number;
 };
 
 export type DetectionSettings = {

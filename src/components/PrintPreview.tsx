@@ -15,8 +15,15 @@ export default function PrintPreview({
 
   const previewWidth = 210;
   const previewHeight = previewWidth * (layout.pageHeight / layout.pageWidth);
-  const gap = Math.max(1, Math.min(8, layout.gap / 8));
-  const margin = Math.max(3, Math.min(16, layout.margin / 8));
+  const previewScale = previewWidth / layout.pageWidth;
+  const gap = layout.gap * previewScale;
+  const margin = layout.margin * previewScale;
+  const cellWidth =
+    (layout.pageWidth - layout.margin * 2 - layout.gap * (layout.columns - 1)) /
+    layout.columns;
+  const cellHeight =
+    (layout.pageHeight - layout.margin * 2 - layout.gap * (layout.rows - 1)) /
+    layout.rows;
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -24,7 +31,7 @@ export default function PrintPreview({
         <div>
           <h2 className="text-sm font-semibold">Print preview</h2>
           <p className="mt-1 text-xs text-gray-500">
-            Approximate placement on your output sheet.
+            Sheet geometry is scaled to match the exported PDF.
           </p>
         </div>
         <div className="rounded-lg bg-gray-100 px-3 py-2 text-right">
@@ -59,20 +66,32 @@ export default function PrintPreview({
                     gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))`,
                   }}
                 >
-                  {sheetLabels.map((label) => (
-                    <div
-                      key={label.id}
-                      className="flex min-h-0 items-center justify-center overflow-hidden border border-dashed border-blue-300 bg-blue-50/70 p-1"
-                      title={label.sourceFileName}
-                    >
-                      <div className="w-full space-y-1">
-                        <div className="h-1.5 w-2/3 bg-gray-400" />
-                        <div className="h-1 w-1/2 bg-gray-300" />
-                        <div className="mt-1 h-3 w-full bg-gray-800" />
-                        <div className="mx-auto h-3 w-1/3 bg-gray-300" />
+                  {sheetLabels.map((label, labelIndex) => {
+                    const cropWidth = label.cropBox.right - label.cropBox.left;
+                    const cropHeight = label.cropBox.top - label.cropBox.bottom;
+                    const outputScale = Math.min(
+                      layout.labelWidth / cropWidth,
+                      layout.labelHeight / cropHeight,
+                      cellWidth / cropWidth,
+                      cellHeight / cropHeight,
+                    );
+                    const width = cropWidth * outputScale * previewScale;
+                    const height = cropHeight * outputScale * previewScale;
+                    return (
+                      <div
+                        key={label.id}
+                        className="flex min-h-0 items-center justify-center overflow-hidden border border-dashed border-[#68C7D0] bg-[#68C7D0]/10"
+                        title={`${label.sourceFileName} · ${cropWidth.toFixed(0)} × ${cropHeight.toFixed(0)} pt`}
+                      >
+                        <div
+                          className="flex max-h-full max-w-full items-center justify-center overflow-hidden border border-[#68C7D0] bg-white text-[8px] font-medium text-[#263238]"
+                          style={{ width: `${width}px`, height: `${height}px` }}
+                        >
+                          #{start + labelIndex + 1}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );
