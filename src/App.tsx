@@ -1,191 +1,351 @@
 
-import { useState } from 'react'
-import { PDFDocument } from 'pdf-lib'
-import { Upload, FileText, Download, LoaderCircle } from 'lucide-react'
+import { useState } from "react";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { Download, ScanSearch } from "lucide-react";
 
-const PAGE_W = 595.28 // A4 width in points
-const PAGE_H = 841.89 // A4 height in points
-const MARGIN = 20
-const GAP = 8
+import Header from "./components/Header";
+import PdfUploader from "./components/PdfUploader";
+import CropSettings from "./components/CropSettings";
+import PdfPreview from "./components/PdfPreview";
+import LabelEditor from "./components/LabelEditor";
+import LabelPreview from "./components/LabelPreview";
+import LayoutSettings from "./components/LayoutSettings";
+import PrintPreview from "./components/PrintPreview";
+
+import type { SourcePdf } from "./types/pdf";
+import type {
+  CropMode,
+  DetectionSettings,
+  LabelLayout,
+  ShippingLabel,
+} from "./types/label";
+
+import { detectLabelsForPage } from "./services/labelDetector";
+import { exportLabelsToPdf, downloadPdf } from "./services/pdfExporter";
+
+GlobalWorkerOptions.workerSrc = workerUrl;
+
+const initialLayout: LabelLayout = {
+  columns: 2,
+  rows: 3,
+  pageWidth: 595.28,
+  pageHeight: 841.89,
+  margin: 18,
+  gap: 10,
+};
 
 export default function App() {
-  const [files, setFiles] = useState<File[]>([])
-  const [rows, setRows] = useState(4)
-  const [cols, setCols] = useState(2)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [count, setCount] = useState(0)
+  const [files, setFiles] = useState<SourcePdf[]>([]);
+  const [activeId, setActiveId] = useState("");
+  const [cropMode, setCropMode] = useState<CropMode>("auto");
+  const [rows, setRows] = useState(2);
+  const [columns, setColumns] = useState(3);
+  const [keepRatio, setKeepRatio] = useState(0.68);
+  const [labels, setLabels] = useState<ShippingLabel[]>([]);
+  const [selectedLabelId, setSelectedLabelId] = useState("");
+  const [layout, setLayout] = useState<LabelLayout>(initialLayout);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
-  async function generatePDF() {
-    if (!files.length) {
-      setError('Please select at least one PDF.')
-      return
+  const activeFile = files.find((file) => file.id === activeId);
+  const selectedLabel = labels.find((label) => label.id === selectedLabelId);
+
+  async function handleFiles(selectedFiles: FileList | File[]) {
+    const pdfFiles = Array.from(selectedFiles).filter(
+      (file) =>
+        file.type === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf"),
+    );
+
+    if (!pdfFiles.length) {
+      setError("Please select one or more PDF files.");
+      return;
     }
 
-    if (rows * cols > 100) {
-      setError('Maximum 100 labels per page for this MVP.')
-      return
-    }
+    setError("");
+    setMessage("");
+    setLoading(true);
 
-    setLoading(true)
-    setError('')
+    const loadedFiles: SourcePdf[] = [];
 
     try {
-      const output = await PDFDocument.create()
-      const labels: {
-        page: Awaited<ReturnType<typeof output.embedPdf>>[number]
-        width: number
-        height: number
-      }[] = []
+      for (const file of pdfFiles) {
+        const data = new Uint8Array(await file.arrayBuffer());
+        const pdf = await getDocument({ data }).promise;
 
-      for (const file of files) {
-        const source = await PDFDocument.load(await file.arrayBuffer())
-        const embeddedPages = await output.embedPdf(
-          await file.arrayBuffer()
-        )
-
-        embeddedPages.forEach((page) => {
-          const size = page.scale(1)
-          labels.push({ page, width: size.width, height: size.height })
-        })
+        loadedFiles.push({
+          id: crypto.randomUUID(),
+          file,
+          pdf,
+        });
       }
 
-      const perPage = rows * cols
-      const cellW = (PAGE_W - 2 * MARGIN - (cols - 1) * GAP) / cols
-      const cellH = (PAGE_H - 2 * MARGIN - (rows - 1) * GAP) / rows
+      setFiles((current) => [...current, ...loadedFiles]);
 
-      for (let start = 0; start < labels.length; start += perPage) {
-        const sheet = output.addPage([PAGE_W, PAGE_H])
-
-        labels.slice(start, start + perPage).forEach((label, i) => {
-          const row = Math.floor(i / cols)
-          const col = i % cols
-
-          const scale = Math.min(
-            cellW / label.width,
-            cellH / label.height
-          )
-
-          const width = label.width * scale
-          const height = label.height * scale
-          const x = MARGIN + col * (cellW + GAP) + (cellW - width) / 2
-          const y = PAGE_H - MARGIN - (row + 1) * cellH - row * GAP
-            + (cellH - height) / 2
-
-          sheet.drawPage(label.page, { x, y, width, height })
-        })
+      if (!activeId && loadedFiles[0]) {
+        setActiveId(loadedFiles[0].id);
       }
-
-      const bytes = await output.save()
-      const blob = new Blob([bytes as BlobPart], {
-        type: 'application/pdf',
-      })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = 'porygon-labels.pdf'
-      link.click()
-      URL.revokeObjectURL(url)
-      setCount(labels.length)
-    } catch (e) {
-      setError('Could not process these PDFs. Check that they are valid and not password-protected.')
-      console.error(e)
+    } catch {
+      for (const item of loadedFiles) void item.pdf.destroy();
+      setError("A PDF could not be opened. Please check the file.");
     } finally {
-      setLoading(false)
+      setLoading(false);
+    }
+  }
+
+  function handleRemove(id: string) {
+    const removed = files.find((file) => file.id === id);
+    if (removed) void removed.pdf.destroy();
+
+    const remaining = files.filter((file) => file.id !== id);
+    setFiles(remaining);
+    setLabels((current) => current.filter((label) => label.sourceFileId !== id));
+
+    if (activeId === id) setActiveId(remaining[0]?.id ?? "");
+  }
+
+  async function runDetection() {
+    if (!files.length) {
+      setError("Upload at least one PDF before detecting labels.");
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    setLoading(true);
+
+    try {
+      const detected: ShippingLabel[] = [];
+
+      const settings: DetectionSettings = {
+        mode: cropMode,
+        rows,
+        columns,
+        shippingLabelHeightRatio: keepRatio,
+      };
+
+      for (const source of files) {
+        const bytes = new Uint8Array(await source.file.arrayBuffer());
+
+        for (let pageIndex = 0; pageIndex < source.pdf.numPages; pageIndex++) {
+          const pageLabels = await detectLabelsForPage({
+            pdfBytes: bytes,
+            sourceFileId: source.id,
+            sourceFileName: source.file.name,
+            pageIndex,
+            settings,
+          });
+
+          detected.push(...pageLabels);
+        }
+      }
+
+      setLabels(detected);
+      setSelectedLabelId(detected[0]?.id ?? "");
+      setMessage(
+        `Created ${detected.length} crop suggestion(s). Review the boundaries before exporting.`,
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not detect label regions.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateLabel(updated: ShippingLabel) {
+    setLabels((current) =>
+      current.map((label) => (label.id === updated.id ? updated : label)),
+    );
+  }
+
+  async function handleExport(oneLabelPerPage: boolean) {
+    if (!labels.length) {
+      setError("Detect labels before exporting.");
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    setExporting(true);
+
+    try {
+      const sourceMap = new Map(
+        files.map((item) => [item.id, item.file]),
+      );
+
+      const bytes = await exportLabelsToPdf({
+        labels,
+        sourceFiles: sourceMap,
+        layout,
+        oneLabelPerPage,
+      });
+
+      downloadPdf(
+        bytes,
+        oneLabelPerPage ? "porygon-labels.pdf" : "porygon-print-sheet.pdf",
+      );
+
+      setMessage("Your PDF export is ready.");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "PDF export failed.",
+      );
+    } finally {
+      setExporting(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-white px-5 py-12 text-slate-900">
-      <div className="mx-auto max-w-3xl">
-        <header className="mb-10">
-          <div className="mb-3 flex items-center gap-3">
-            <div className="rounded-xl bg-[#E9967A]/15 p-3 text-[#D47B60]">
-              <FileText size={28} />
-            </div>
-            <h1 className="text-3xl font-bold tracking-tight">Porygon</h1>
-          </div>
-          <p className="text-slate-500">
-            Combine shipping labels. Save paper. Print smarter.
-          </p>
-        </header>
+    <div className="min-h-screen bg-gray-50 text-gray-900">
+      <Header canExport={labels.length > 0 && !exporting} />
 
-        <section className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <label className="flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-10 text-center transition hover:border-[#E9967A] hover:bg-[#E9967A]/5">
-            <Upload size={32} className="text-[#D47B60]" />
-            <span className="font-semibold">Choose shipping label PDFs</span>
-            <span className="text-sm text-slate-500">
-              Select multiple PDF files
-            </span>
-            <input
-              type="file"
-              accept="application/pdf,.pdf"
-              multiple
-              className="max-w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-white file:px-3 file:py-2 file:font-medium file:text-slate-700 file:shadow-sm"
-              onChange={(e) => {
-                setFiles(Array.from(e.target.files ?? []))
-                setError('')
-              }}
+      <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-7 sm:px-6 lg:px-8">
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">
+            PDF workspace
+          </p>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            Prepare shipping labels
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
+            Keep the complete shipping label. Exclude invoice and product-details
+            sections before printing.
+          </p>
+        </div>
+
+        {error && (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+        {message && (
+          <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            {message}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[340px_minmax(0,1fr)]">
+          <aside className="space-y-5">
+            <PdfUploader
+              files={files}
+              activeId={activeId}
+              loading={loading}
+              onFilesSelected={handleFiles}
+              onSelect={setActiveId}
+              onRemove={handleRemove}
             />
-          </label>
 
-          {files.length > 0 && (
-            <p className="text-sm text-emerald-600">
-              {files.length} PDF file(s) selected
-            </p>
-          )}
+            <CropSettings
+              mode={cropMode}
+              rows={rows}
+              columns={columns}
+              onModeChange={setCropMode}
+              onRowsChange={setRows}
+              onColumnsChange={setColumns}
+            />
 
-          <div className="grid grid-cols-2 gap-4">
-            <label className="text-sm font-medium text-slate-600">
-              Rows per page
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={rows}
-                onChange={(e) => setRows(Number(e.target.value))}
-                className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-[#E9967A] focus:ring-2 focus:ring-[#E9967A]/20"
+            {cropMode === "grid" && (
+              <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                <label className="block text-xs text-gray-600">
+                  Keep each grid cell's top
+                  <span className="ml-1 font-semibold text-gray-900">
+                    {Math.round(keepRatio * 100)}%
+                  </span>
+                  <input
+                    type="range"
+                    min="35"
+                    max="100"
+                    value={Math.round(keepRatio * 100)}
+                    onChange={(event) => setKeepRatio(Number(event.target.value) / 100)}
+                    className="mt-3 w-full accent-blue-600"
+                  />
+                </label>
+                <p className="mt-2 text-[11px] leading-5 text-gray-500">
+                  Use this to exclude the invoice portion below a shipping label.
+                  Check each crop before exporting.
+                </p>
+              </section>
+            )}
+
+            <button
+              type="button"
+              onClick={runDetection}
+              disabled={loading || files.length === 0}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ScanSearch size={17} />
+              {loading ? "Processing PDFs..." : "Detect labels"}
+            </button>
+          </aside>
+
+          <div className="min-w-0 space-y-5">
+            <PdfPreview file={activeFile} />
+
+            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Detected labels</h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Select a label below to edit its crop boundaries.
+                  </p>
+                </div>
+                <span className="rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600">
+                  {labels.length} labels
+                </span>
+              </div>
+
+              <LabelPreview
+                labels={labels}
+                files={files}
+                selectedId={selectedLabelId}
+                onSelect={setSelectedLabelId}
               />
-            </label>
+            </section>
 
-            <label className="text-sm font-medium text-slate-600">
-              Columns per page
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={cols}
-                onChange={(e) => setCols(Number(e.target.value))}
-                className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-[#E9967A] focus:ring-2 focus:ring-[#E9967A]/20"
-              />
-            </label>
+            <LabelEditor
+              label={selectedLabel}
+              onChange={updateLabel}
+            />
+
+            <LayoutSettings layout={layout} onChange={setLayout} />
+
+            <PrintPreview labels={labels} layout={layout} />
+
+            <section className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:flex-row">
+              <button
+                type="button"
+                onClick={() => void handleExport(true)}
+                disabled={!labels.length || exporting}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 py-3 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50"
+              >
+                <Download size={16} />
+                {exporting ? "Exporting..." : "Export one label per page"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExport(false)}
+                disabled={!labels.length || exporting}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Download size={16} />
+                {exporting ? "Exporting..." : "Export print sheets"}
+              </button>
+            </section>
           </div>
+        </div>
 
-          <p className="text-sm text-slate-500">
-            Layout: {rows * cols} labels per A4 page, with automatic extra pages.
-          </p>
-
-          <button
-            onClick={generatePDF}
-            disabled={loading || !files.length || rows < 1 || cols < 1}
-            className="flex w-full items-center justify-center gap-2 rounded-xl p-4 bg-gray-600 text-white hover:bg-gray-700 font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? <LoaderCircle className="animate-spin" /> : <Download />}
-            {loading ? 'Generating PDF...' : 'Generate & Download PDF'}
-          </button>
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {count > 0 && !error && (
-            <p className="text-sm text-emerald-600">
-              Generated {count} labels successfully.
-            </p>
-          )}
-        </section>
-
-        <p className="mt-6 text-center text-xs text-slate-400">
-          Your PDFs are processed locally in your browser.
-        </p>
-      </div>
-    </main>
-  )
+        <footer className="flex justify-between gap-4 py-2 text-[11px] text-gray-400">
+          <span>Porygon</span>
+          <span className="text-right">PDF processing runs in your browser</span>
+        </footer>
+      </main>
+    </div>
+  );
 }
