@@ -245,8 +245,10 @@ export default function App() {
 
       <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-7 sm:px-6 lg:px-8">
 
-        <div className="grid grid-cols-1 items-center gap-5 lg:grid-cols-[1fr_400px]">
 
+        <div className="grid grid-cols-1 items-center gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+
+          {/* Page heading */}
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">
               PDF workspace
@@ -265,10 +267,11 @@ export default function App() {
           {/* Promotional card */}
           <PromoCard
             image="/promo.jpg"
-            title="A Face to Remember."
-            description="Some moments deserve a second look."
-            link="https://github.com/Ramxxn"
+            title="A Face to Remember!"
+            description="Some faces have a way of making an ordinary moment feel a little more memorable, leaving an impression that stays long after the moment has passed."
+            link="YOUR_GITHUB_PROFILE_URL"
           />
+
         </div>
 
 
