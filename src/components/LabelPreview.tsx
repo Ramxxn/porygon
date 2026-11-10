@@ -151,7 +151,8 @@ export default function LabelPreview({
   }
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+    <div className="max-h-[600px] overflow-y-auto overflow-x-hidden pr-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
       {labels.map((label, index) => {
         const selected = label.id === selectedId;
         const needsReview = label.confidence < 0.6;
@@ -221,6 +222,7 @@ export default function LabelPreview({
           </button>
         );
       })}
+    </div>
     </div>
   );
 }

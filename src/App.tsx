@@ -21,6 +21,7 @@ import type {
 } from "./types/label";
 
 import { detectLabelsForPage } from "./services/labelDetector";
+import PromoCard from "./components/PromoCard";
 
 const initialLayout: LabelLayout = {
   columns: 2,
@@ -240,24 +241,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white text-[#263238]">
-      <Header
-        canExport={labels.length > 0 && !exporting}
-        onExport={() => void handleExport(false)}
-      />
+      <Header />
 
       <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-7 sm:px-6 lg:px-8">
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">
-            PDF workspace
-          </p>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Prepare shipping labels
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
-            Preserve every label detail, then refine the crop and arrange labels
-            for print.
-          </p>
+
+        <div className="grid grid-cols-1 items-center gap-5 lg:grid-cols-[1fr_400px]">
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">
+              PDF workspace
+            </p>
+
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+              Prepare shipping labels
+            </h1>
+
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
+              Preserve every label detail, then refine the crop and arrange labels
+              for print.
+            </p>
+          </div>
+
+          {/* Promotional card */}
+          <PromoCard
+            image="/promo.jpg"
+            title="A Face to Remember."
+            description="Some moments deserve a second look."
+            link="https://github.com/Ramxxn"
+          />
         </div>
+
 
         {error && (
           <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
