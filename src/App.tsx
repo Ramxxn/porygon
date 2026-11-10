@@ -1,7 +1,7 @@
 
 import { useState } from "react";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { Download, ScanSearch } from "lucide-react";
+import { Download, ScanSearch, Settings2, X } from "lucide-react";
 
 import Header from "./components/Header";
 import PdfUploader from "./components/PdfUploader";
@@ -9,7 +9,6 @@ import CropSettings from "./components/CropSettings";
 import PdfPreview from "./components/PdfPreview";
 import LabelEditor from "./components/LabelEditor";
 import LabelPreview from "./components/LabelPreview";
-import LayoutSettings from "./components/LayoutSettings";
 import PrintPreview from "./components/PrintPreview";
 
 import type { SourcePdf } from "./types/pdf";
@@ -22,6 +21,7 @@ import type {
 
 import { detectLabelsForPage } from "./services/labelDetector";
 import PromoCard from "./components/PromoCard";
+import LayoutSettings from "./components/LayoutSettings";
 
 const initialLayout: LabelLayout = {
   columns: 2,
@@ -47,6 +47,7 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [showLayout, setShowLayout] = useState(false);
 
   const activeFile = files.find((file) => file.id === activeId);
   const selectedLabel = labels.find((label) => label.id === selectedLabelId);
@@ -352,9 +353,32 @@ export default function App() {
               onMove={moveLabel}
             />
 
-            <LayoutSettings layout={layout} onChange={setLayout} />
 
-            <PrintPreview labels={labels} layout={layout} />
+            <PrintPreview
+              labels={labels}
+              layout={layout}
+              onOpenLayout={() => setShowLayout(true)}
+            />
+
+            {showLayout && (
+              <div className="fixed inset-0 z-50 flex justify-end">
+                <div
+                  className="absolute inset-0 bg-black/40"
+                  onClick={() => setShowLayout(false)}
+                />
+
+                <div className="relative z-10 h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-xl">
+                  <div className="mb-5 flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">Sheet Layout</h2>
+                    <button onClick={() => setShowLayout(false)}>
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <LayoutSettings layout={layout} onChange={setLayout} />
+                </div>
+              </div>
+            )}
 
             <section className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:flex-row">
               <button

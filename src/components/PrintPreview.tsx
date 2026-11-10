@@ -1,14 +1,16 @@
-
 import type { LabelLayout, ShippingLabel } from "../types/label";
+import { Settings2 } from "lucide-react";
 
 type PrintPreviewProps = {
   labels: ShippingLabel[];
   layout: LabelLayout;
+  onOpenLayout: () => void;
 };
 
 export default function PrintPreview({
   labels,
   layout,
+  onOpenLayout,
 }: PrintPreviewProps) {
   const labelsPerSheet = Math.max(1, layout.rows * layout.columns);
   const sheetCount = Math.ceil(labels.length / labelsPerSheet);
@@ -27,16 +29,36 @@ export default function PrintPreview({
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      
         <div>
-          <h2 className="text-sm font-semibold">Print preview</h2>
+          <h2 className="text-sm font-semibold text-gray-900">
+            Print Preview
+          </h2>
           <p className="mt-1 text-xs text-gray-500">
             Sheet geometry is scaled to match the exported PDF.
           </p>
         </div>
-        <div className="rounded-lg bg-gray-100 px-3 py-2 text-right">
-          <p className="text-sm font-semibold text-gray-900">{sheetCount}</p>
-          <p className="text-[10px] text-gray-500">sheets</p>
+
+        <div className="flex items-center gap-3 sm:ml-auto">
+         
+          <div className="flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3">
+            <span className="text-xs font-semibold leading-none text-gray-600">
+              {sheetCount}
+            </span>
+            <span className="text-xs font-medium text-gray-500">
+              {sheetCount === 1 ? "Sheet" : "Sheets"}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenLayout}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          >
+            <Settings2 size={15} />
+            Sheet Layout
+          </button>
         </div>
       </div>
 
