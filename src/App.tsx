@@ -1,7 +1,7 @@
 
 import { useState } from "react";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { Download, ScanSearch, Settings2, X } from "lucide-react";
+import { Download, ScanSearch, X } from "lucide-react";
 
 import Header from "./components/Header";
 import PdfUploader from "./components/PdfUploader";
