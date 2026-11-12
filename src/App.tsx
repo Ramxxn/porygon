@@ -270,7 +270,7 @@ export default function App() {
             image="/promo.jpg"
             title="A Face to Remember!"
             description="Some faces have a way of making an ordinary moment feel a little more memorable, leaving an impression that stays long after the moment has passed."
-            link="YOUR_GITHUB_PROFILE_URL"
+            link="https://github.com/Ramxxn"
           />
 
         </div>
